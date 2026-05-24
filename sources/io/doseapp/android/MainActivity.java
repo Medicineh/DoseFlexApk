@@ -2,8 +2,6 @@ package io.doseapp.android;
 
 import android.content.Intent;
 import android.graphics.Bitmap;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -20,15 +18,8 @@ import android.webkit.WebViewClient;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
-import com.android.volley.Response;
-import com.android.volley.VolleyError;
-import com.android.volley.toolbox.StringRequest;
-import com.android.volley.toolbox.Volley;
-import com.google.android.gms.tasks.OnCompleteListener;
-import com.google.android.gms.tasks.Task;
-import com.google.firebase.analytics.FirebaseAnalytics;
-import com.google.firebase.iid.FirebaseInstanceId;
-import com.google.firebase.iid.InstanceIdResult;
+import androidx.appcompat.app.AppCompatDelegate;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import com.kobakei.ratethisapp.RateThisApp;
 import im.delight.android.webview.AdvancedWebView;
 import io.doseapp.android.ui.UIManager;
@@ -41,11 +32,10 @@ import java.net.URLDecoder;
 public class MainActivity extends AppCompatActivity implements AdvancedWebView.Listener {
     private static final int CREATE_FILE = 1;
     private byte[] decodedFile;
-    public String fcmToken;
     private boolean isOffline;
-    private FirebaseAnalytics mFirebaseAnalytics;
     private AdvancedWebView mWebView;
     private LinearLayout offlineContainer;
+    private SwipeRefreshLayout swipeRefreshLayout;
     private UIManager uiManager;
     private WindowActivity windowActivity;
     private String TAG = "MainActivity";
@@ -56,7 +46,7 @@ public class MainActivity extends AppCompatActivity implements AdvancedWebView.L
     protected void onCreate(Bundle bundle) {
         super.onCreate(bundle);
         setContentView(R.layout.activity_main);
-        this.mFirebaseAnalytics = FirebaseAnalytics.getInstance(this);
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM);
         AdvancedWebView advancedWebView = (AdvancedWebView) findViewById(R.id.webView);
         this.mWebView = advancedWebView;
         advancedWebView.setListener(this, this);
@@ -100,55 +90,33 @@ public class MainActivity extends AppCompatActivity implements AdvancedWebView.L
                 }
             }
         });
-        this.mWebView.addJavascriptInterface(new WebAppInterface(this, this.mFirebaseAnalytics, this), "Android");
-        if (!isNetworkAvailable()) {
-            Log.i(this.TAG, "Cache offline");
-            this.mWebView.getSettings().setCacheMode(1);
-        } else {
-            Log.i(this.TAG, "Cache online");
-            this.mWebView.getSettings().setCacheMode(-1);
-        }
-        this.mWebView.addPermittedHostname("doseapp.io");
-        this.mWebView.addPermittedHostname("canary.doseapp.io");
-        this.mWebView.addPermittedHostname("pageclip.co");
-        this.mWebView.addPermittedHostname("192.168.1.2");
-        this.mWebView.addPermittedHostname("dosejournal.com");
+        this.mWebView.addJavascriptInterface(new WebAppInterface(this, this), "Android");
+        SwipeRefreshLayout swipeRefreshLayout = (SwipeRefreshLayout) findViewById(R.id.swipeRefreshLayout);
+        this.swipeRefreshLayout = swipeRefreshLayout;
+        swipeRefreshLayout.setColorSchemeResources(R.color.colorPrimary, R.color.green);
+        this.swipeRefreshLayout.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() { // from class: io.doseapp.android.MainActivity.3
+            @Override // androidx.swiperefreshlayout.widget.SwipeRefreshLayout.OnRefreshListener
+            public void onRefresh() {
+                MainActivity.this.mWebView.reload();
+            }
+        });
+        this.mWebView.getSettings().setCacheMode(1);
+        this.mWebView.addPermittedHostname("localhost");
         this.mWebView.loadUrl(Constants.WEBAPP_URL);
         LinearLayout linearLayout = (LinearLayout) findViewById(R.id.offlineContainer);
         this.offlineContainer = linearLayout;
-        linearLayout.setOnClickListener(new View.OnClickListener() { // from class: io.doseapp.android.MainActivity.3
+        linearLayout.setOnClickListener(new View.OnClickListener() { // from class: io.doseapp.android.MainActivity.4
             @Override // android.view.View.OnClickListener
             public void onClick(View view) {
                 MainActivity.this.mWebView.loadUrl(Constants.WEBAPP_URL);
             }
         });
-        getToken();
         this.uiManager.changeRecentAppsIcon();
         RateThisApp.Config config = new RateThisApp.Config(7, 10);
         config.setMessage(R.string.rate_message);
         RateThisApp.init(config);
         RateThisApp.onCreate(this);
         RateThisApp.showRateDialogIfNeeded(this);
-    }
-
-    private boolean isNetworkAvailable() {
-        NetworkInfo activeNetworkInfo = ((ConnectivityManager) getSystemService("connectivity")).getActiveNetworkInfo();
-        return activeNetworkInfo != null && activeNetworkInfo.isConnected();
-    }
-
-    private void getToken() {
-        FirebaseInstanceId.getInstance().getInstanceId().addOnCompleteListener(new OnCompleteListener<InstanceIdResult>() { // from class: io.doseapp.android.MainActivity.4
-            @Override // com.google.android.gms.tasks.OnCompleteListener
-            public void onComplete(Task<InstanceIdResult> task) {
-                if (!task.isSuccessful()) {
-                    Log.w(MainActivity.this.TAG, "getInstanceId failed", task.getException());
-                    return;
-                }
-                String token = task.getResult().getToken();
-                MainActivity.this.fcmToken = token;
-                MainActivity.this.saveToken(token);
-            }
-        });
     }
 
     public void setOffline(boolean z) {
@@ -163,21 +131,6 @@ public class MainActivity extends AppCompatActivity implements AdvancedWebView.L
         this.mWebView.setVisibility(0);
         this.offlineContainer.setVisibility(4);
         this.isOffline = false;
-    }
-
-    /* JADX INFO: Access modifiers changed from: private */
-    public void saveToken(String str) {
-        Volley.newRequestQueue(this).add(new StringRequest(1, "https://backup.doseapp.io/v1/fcm-token/" + str, new Response.Listener<String>() { // from class: io.doseapp.android.MainActivity.5
-            @Override // com.android.volley.Response.Listener
-            public void onResponse(String str2) {
-                Log.i(MainActivity.this.TAG, "FCM token save" + str2);
-            }
-        }, new Response.ErrorListener() { // from class: io.doseapp.android.MainActivity.6
-            @Override // com.android.volley.Response.ErrorListener
-            public void onErrorResponse(VolleyError volleyError) {
-                Log.w(MainActivity.this.TAG, volleyError.toString());
-            }
-        }));
     }
 
     @Override // androidx.fragment.app.FragmentActivity, android.app.Activity
@@ -225,6 +178,7 @@ public class MainActivity extends AppCompatActivity implements AdvancedWebView.L
     @Override // im.delight.android.webview.AdvancedWebView.Listener
     public void onPageFinished(String str) {
         Log.i(this.TAG, "pageFinished" + str);
+        this.swipeRefreshLayout.setRefreshing(false);
         if (this.isOffline) {
             setOffline(false);
         }
@@ -233,6 +187,7 @@ public class MainActivity extends AppCompatActivity implements AdvancedWebView.L
     @Override // im.delight.android.webview.AdvancedWebView.Listener
     public void onPageError(int i, String str, String str2) {
         Log.i(this.TAG, "pageError" + i + str + str2);
+        this.swipeRefreshLayout.setRefreshing(false);
         setOffline(true);
     }
 
