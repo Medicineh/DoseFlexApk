@@ -53,8 +53,14 @@ public class MainActivity extends AppCompatActivity implements AdvancedWebView.L
         this.isOffline = false;
         this.uiManager = new UIManager(this);
         this.mWebView.getSettings().setAppCachePath(getApplicationContext().getCacheDir().getAbsolutePath());
-        this.mWebView.getSettings().setAllowFileAccess(true);
+        // The app only loads remote content from Constants.WEBAPP_URL and does not render local file:// pages.
+        // Keep file access disabled to reduce the WebView attack surface.
+        this.mWebView.getSettings().setAllowFileAccess(false);
+        // Harden against file-scheme privilege escalation even if a file:// URL is opened accidentally.
+        this.mWebView.getSettings().setAllowUniversalAccessFromFileURLs(false);
+        this.mWebView.getSettings().setAllowFileAccessFromFileURLs(false);
         this.mWebView.getSettings().setAppCacheEnabled(true);
+        // Required by the hosted web app (app.js) and the Android JS bridge (window.Android).
         this.mWebView.getSettings().setJavaScriptEnabled(true);
         this.mWebView.setWebChromeClient(new WebChromeClient() { // from class: io.doseapp.android.MainActivity.1
             @Override // android.webkit.WebChromeClient
