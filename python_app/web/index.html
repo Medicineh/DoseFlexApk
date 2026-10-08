@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dose</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: sans-serif; margin: 0; padding: 16px; background: #0f172a; color: #e2e8f0; }
+    .card { max-width: 720px; margin: 0 auto 12px; background: #1e293b; border-radius: 12px; padding: 16px; }
+    h1 { margin: 0 0 4px; font-size: 1.5rem; }
+    h2 { margin: 0 0 8px; font-size: 1.1rem; }
+    .muted { color: #94a3b8; }
+    form { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; }
+    input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 1rem; }
+    .note { grid-column: 1 / -1; }
+    button { padding: 10px 14px; border: 0; border-radius: 8px; font-size: 1rem; color: #fff; background: #334155; }
+    button.primary { grid-column: 1 / -1; background: #15803d; }
+    button.danger { background: #991b1b; padding: 6px 10px; font-size: .9rem; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #334155; }
+    li:last-child { border-bottom: 0; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    #msg { display: none; white-space: pre-wrap; word-break: break-all; }
+    #msg.error { color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Dose</h1>
+    <p class="muted">Funciona en local, sin conexión a Internet.</p>
+    <form id="form">
+      <input id="substance" placeholder="Sustancia" required autocomplete="off" />
+      <input id="amount" placeholder="Cantidad" inputmode="decimal" required />
+      <input id="unit" value="mg" />
+      <input id="note" class="note" placeholder="Nota (opcional)" autocomplete="off" />
+      <button class="primary" type="submit">Añadir dosis</button>
+    </form>
+  </div>
+
+  <div class="card" id="msg"></div>
+
+  <div class="card">
+    <h2>Resumen (últimas 24 h)</h2>
+    <ul id="summary"></ul>
+  </div>
+
+  <div class="card">
+    <h2>Historial</h2>
+    <ul id="doses"></ul>
+  </div>
+
+  <div class="card actions">
+    <button id="export">Exportar copia</button>
+    <button id="import">Importar copia</button>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function showMessage(text, isError) {
+      const box = $("msg");
+      box.textContent = text;
+      box.className = "card" + (isError ? " error" : "");
+      box.style.display = "block";
+    }
+
+    function item(text) {
+      const li = document.createElement("li");
+      const span = document.createElement("span");
+      span.textContent = text;
+      li.appendChild(span);
+      return li;
+    }
+
+    function render(state) {
+      const summary = $("summary");
+      summary.replaceChildren();
+      if (!state.summary.length) summary.appendChild(item("Todavía no hay dosis."));
+      for (const s of state.summary) {
+        summary.appendChild(item(`${s.substance}: ${s.total} ${s.unit} · última hace ${s.since}`));
+      }
+      const list = $("doses");
+      list.replaceChildren();
+      for (const d of state.doses) {
+        const li = item(`${d.when}  ${d.substance} ${d.amount_text} ${d.unit}` + (d.note ? ` (${d.note})` : ""));
+        const del = document.createElement("button");
+        del.className = "danger";
+        del.textContent = "Borrar";
+        del.onclick = () => removeDose(d);
+        li.appendChild(del);
+        list.appendChild(li);
+      }
+    }
+
+    async function api(method, path, body) {
+      const res = await fetch(path, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error desconocido.");
+      return data;
+    }
+
+    async function load() {
+      try { render(await api("GET", "/api/doses")); }
+      catch (e) { showMessage(e.message, true); }
+    }
+
+    async function removeDose(d) {
+      if (!confirm(`¿Borrar la dosis de ${d.substance}?`)) return;
+      try { render(await api("DELETE", "/api/doses/" + d.id)); }
+      catch (e) { showMessage(e.message, true); }
+    }
+
+    $("form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      try {
+        render(await api("POST", "/api/doses", {
+          substance: $("substance").value,
+          amount: $("amount").value,
+          unit: $("unit").value,
+          note: $("note").value,
+        }));
+        $("amount").value = "";
+        $("note").value = "";
+        $("msg").style.display = "none";
+      } catch (e) { showMessage("No se pudo guardar: " + e.message, true); }
+    });
+
+    $("export").onclick = async () => {
+      try { showMessage("Copia guardada en:\n" + (await api("POST", "/api/export", {})).path); }
+      catch (e) { showMessage("Error al exportar: " + e.message, true); }
+    };
+
+    $("import").onclick = async () => {
+      try {
+        const r = await api("POST", "/api/import", {});
+        render(r);
+        showMessage(`Copia importada: ${r.file}\nDosis nuevas añadidas: ${r.added}`);
+      } catch (e) { showMessage("Error al importar: " + e.message, true); }
+    };
+
+    load();
+    // Actualiza el tiempo transcurrido cada minuto.
+    setInterval(load, 60000);
+  </script>
+</body>
+</html>
